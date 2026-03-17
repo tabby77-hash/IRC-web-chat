@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>#GlobalChat - IRC Modern</title>
+    <script src="http://localhost:3000/socket.io/socket.io.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        .chat-window { height: calc(100vh - 180px); }
+        .tab-active { border-bottom: 2px solid #6366f1; background: #1e293b; color: white; }
+        
+        .announcement-style {
+            background: rgba(79, 70, 229, 0.1);
+            border-left: 4px solid #6366f1;
+            padding: 1rem;
+            margin: 0.75rem 0;
+            border-radius: 0 0.5rem 0.5rem 0;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-200 font-sans h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-slate-900 border-b border-slate-800 p-4 flex justify-between items-center z-50">
+        <div class="flex items-center space-x-3">
+            <button onclick="switchToChat('global')" class="text-xl font-bold text-indigo-400 hover:text-indigo-300 transition">#GlobalChat</button>
+            <span id="chatStatus" class="text-[10px] uppercase tracking-tighter bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded">Group View</span>
+        </div>
+        <div class="flex items-center space-x-4">
+            <span class="hidden md:block text-xs text-slate-500">Logged in as: <span id="myUsername" class="text-white font-bold"></span></span>
+            <button id="userListBtn" class="relative p-2 bg-slate-800 rounded-full">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                <span id="onlineCountBadge" class="absolute -top-1 -right-1 bg-indigo-600 text-[9px] px-1 rounded-full">0</span>
+            </button>
+        </div>
+    </header>
+
+    <div class="flex flex-1 relative overflow-hidden">
+        <main class="flex-1 flex flex-col p-4 relative">
+            <div id="activeChatHeader" class="mb-2 flex justify-between items-center border-b border-slate-800 pb-2">
+                <h2 id="currentChatTitle" class="font-mono text-lg text-indigo-300">#global</h2>
+                <div id="privateStatus" class="hidden text-xs text-green-500 animate-pulse">● Private Session</div>
+            </div>
+
+            <div id="messageWindow" class="chat-window overflow-y-auto space-y-2 pr-2 font-mono text-sm"></div>
+
+            <form id="chatForm" class="mt-auto flex space-x-2 bg-slate-900 p-2 rounded-xl border border-slate-800">
+                <input type="text" id="messageInput" autocomplete="off" class="flex-1 bg-transparent border-none focus:ring-0 px-2 text-white" placeholder="Type a message...">
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg font-bold transition">Send</button>
+            </form>
+        </main>
+
+        <aside id="sidebar" class="w-64 bg-slate-900 border-l border-slate-800 hidden md:flex flex-col">
+            <div class="p-4 border-b border-slate-800 text-xs font-semibold text-slate-500 uppercase">Online Users</div>
+            <div id="userList" class="flex-1 overflow-y-auto p-2 space-y-1"></div>
+        </aside>
+    </div>
+
+    <div id="chatTabs" class="bg-slate-900 border-t border-slate-800 flex items-center overflow-x-auto h-12 px-2 space-x-2">
+        <button onclick="switchToChat('global')" id="tab-global" class="px-4 h-full text-xs font-bold uppercase tracking-wider tab-active"># Global</button>
+    </div>
+
+    <script>
+        const socket = io('http://localhost:3000');
+        const myData = JSON.parse(localStorage.getItem('chatUser'));
+
+        if (!myData) {
+            window.location.href = 'index.html';
+        } else {
+            document.getElementById('myUsername').innerText = myData.nickname;
+            socket.emit('join', myData);
+        }
+
+        let activeChatId = 'global'; 
+        let chatHistory = { 'global': [] };
+        let unreadCounts = {};
+        let onlineUsers = [];
+
+        // --- SOCKET LISTENERS ---
+
+        socket.on('kicked_notice', (message) => {
+            alert("ADMIN ACTION: " + message);
+            localStorage.removeItem('chatUser');
+            window.location.href = 'index.html';
+        });
+
+        socket.on('error_message', (message) => {
+            alert(message);
+            window.location.href = 'index.html';
+        });
+
+        socket.on('disconnect', (reason) => {
+            if (reason === "io server disconnect") {
+                window.location.href = 'index.html';
+            }
+        });
+
+        socket.on('user_list', (usersFromServer) => {
+            onlineUsers = usersFromServer;
+            renderUserList();
+        });
+
+        socket.on('system_message', (text) => {
+            pushMessage('global', { from: 'System', text: text, type: 'sys' });
+        });
+
+        socket.on('receive_global_message', (data) => {
+            // Save to history regardless of if we are looking at global or not
+            pushMessage('global', data);
+        });
+
+        socket.on('receive_private_message', (data) => {
+            const sender = data.from;
+            if (!chatHistory[sender]) chatHistory[sender] = [];
+            pushMessage(sender, data);
+        });
+
+        // --- HELPERS ---
+
+        function getNicknameColor(name) {
+            const colors = ['#f87171', '#fb923c', '#fbbf24', '#4ade80', '#2dd4bf', '#38bdf8', '#818cf8', '#c084fc', '#f472b6'];
+            let hash = 0;
+            for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+            return colors[Math.abs(hash) % colors.length];
+        }
+
+        // --- LOGIC ---
+
+        function pushMessage(chatId, data) {
+            if (!chatHistory[chatId]) chatHistory[chatId] = [];
+            chatHistory[chatId].push(data);
+
+            if (activeChatId !== chatId) {
+                unreadCounts[chatId] = (unreadCounts[chatId] || 0) + 1;
+                renderTabs();
+            }
+
+            if (activeChatId === chatId) {
+                renderMessages();
+            }
+        }
+
+        function renderUserList() {
+            const container = document.getElementById('userList');
+            document.getElementById('onlineCountBadge').innerText = onlineUsers.length;
+            
+            container.innerHTML = onlineUsers.map(user => {
+                const isMe = user.nickname === myData.nickname;
+                const genderIcon = user.gender ? user.gender[0].toUpperCase() : '?';
+                return `
+                <div ${!isMe ? `onclick="openPrivateChat('${user.nickname}')"` : ''} 
+                     class="flex items-center justify-between p-2 ${isMe ? 'opacity-60 cursor-default' : 'hover:bg-slate-800 cursor-pointer'} rounded group transition">
+                    <div class="flex items-center space-x-2">
+                        <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+                        <span class="text-sm font-medium" style="color: ${getNicknameColor(user.nickname)}">
+                            ${user.nickname} ${isMe ? '(You)' : ''}
+                        </span>
+                    </div>
+                    <span class="text-[10px] text-slate-600">${user.age}${genderIcon}</span>
+                </div>
+            `}).join('');
+        }
+
+        function openPrivateChat(nickname) {
+            if (!chatHistory[nickname]) {
+                chatHistory[nickname] = [{ from: 'System', text: `Private session with ${nickname}`, type: 'sys' }];
+            }
+            switchToChat(nickname);
+        }
+
+        function switchToChat(id) {
+            activeChatId = id;
+            unreadCounts[id] = 0;
+            document.getElementById('currentChatTitle').innerText = id === 'global' ? '# global' : `@ ${id}`;
+            document.getElementById('privateStatus').classList.toggle('hidden', id === 'global');
+            renderMessages();
+            renderTabs();
+            document.getElementById('messageInput').focus();
+        }
+
+        function renderMessages() {
+            const window = document.getElementById('messageWindow');
+            const messages = chatHistory[activeChatId] || [];
+            
+            window.innerHTML = messages.map(msg => {
+                // System Messages
+                if(msg.type === 'sys') return `<div class="text-slate-600 italic text-[11px]">*** ${msg.text}</div>`;
+                
+                // Admin Announcements
+                if(msg.isAdmin) return `
+                    <div class="announcement-style">
+                        <div class="text-indigo-400 text-[10px] font-black uppercase tracking-widest mb-1">System Announcement</div>
+                        <div class="text-white font-bold text-sm italic">"${msg.text}"</div>
+                    </div>`;
+
+                // Standard Messages
+                const isMe = msg.from === myData.nickname;
+                const nameColor = getNicknameColor(msg.from);
+                const genderIcon = msg.gender ? msg.gender[0].toUpperCase() : '';
+                const meta = msg.age ? `<span class="text-slate-500 text-[10px] mr-1">[${msg.age}${genderIcon}]</span>` : '';
+
+                return `
+                    <div class="animate-in fade-in slide-in-from-left-1 duration-200">
+                        <span class="text-slate-600 text-[10px] mr-2">${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                        ${meta}
+                        <span style="color: ${nameColor}" class="font-bold mr-2">${msg.from}:</span>
+                        <span class="text-slate-200">${msg.text}</span>
+                    </div>
+                `;
+            }).join('');
+            window.scrollTop = window.scrollHeight;
+        }
+
+        function renderTabs() {
+            const container = document.getElementById('chatTabs');
+            const privateIds = Object.keys(chatHistory).filter(id => id !== 'global');
+            
+            let html = `<button onclick="switchToChat('global')" class="px-4 h-full text-xs font-bold uppercase ${activeChatId === 'global' ? 'tab-active' : ''}"># Global</button>`;
+            
+            privateIds.forEach(id => {
+                const unread = unreadCounts[id] > 0 ? `<span class="ml-2 bg-red-500 text-[9px] px-1.5 rounded-full animate-bounce">${unreadCounts[id]}</span>` : '';
+                html += `
+                    <div class="flex items-center h-full border-r border-slate-800">
+                        <button onclick="switchToChat('${id}')" class="px-4 h-full text-xs font-bold ${activeChatId === id ? 'tab-active' : 'bg-slate-900 text-slate-400'}">
+                            @ ${id}${unread}
+                        </button>
+                        <button onclick="closeChat('${id}')" class="bg-slate-900 px-2 h-full text-slate-600 hover:text-red-500 transition text-lg font-bold">×</button>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+        }
+
+        function closeChat(id) {
+            delete chatHistory[id];
+            if (activeChatId === id) switchToChat('global');
+            renderTabs();
+        }
+
+        document.getElementById('chatForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const input = document.getElementById('messageInput');
+            const text = input.value.trim();
+            
+            if (text) {
+                if (activeChatId === 'global') {
+                    socket.emit('send_global_message', { text: text });
+                } else {
+                    socket.emit('send_private_message', { toNickname: activeChatId, text: text });
+                    pushMessage(activeChatId, { from: myData.nickname, text: text, age: myData.age, gender: myData.gender });
+                }
+                input.value = '';
+            }
+        });
+    </script>
+</body>
+</html>

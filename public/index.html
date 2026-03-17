@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>#GlobalChat | Entry</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #020617; /* Slate 950 */
+            background-image: radial-gradient(circle at top right, #1e1b4b, transparent), 
+                              radial-gradient(circle at bottom left, #0f172a, transparent);
+            color: #f8fafc;
+        }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+
+    <div class="glass-panel w-full max-w-md rounded-3xl p-8 space-y-8 shadow-2xl transition-all duration-500 hover:shadow-indigo-500/10">
+        
+        <!-- Header -->
+        <div class="text-center space-y-2">
+            <h1 class="text-4xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">
+                #GlobalChat
+            </h1>
+            <p class="text-slate-400 text-sm font-medium tracking-widest uppercase">Identity Verification</p>
+        </div>
+
+        <!-- "Welcome Back" Section (Hidden by default) -->
+        <div id="welcomeBack" class="hidden text-center p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl">
+            <p class="text-sm text-indigo-300 mb-3">Welcome back, <span id="prevName" class="font-bold text-white"></span></p>
+            <div class="flex gap-2">
+                <button onclick="quickJoin()" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold py-2 rounded-xl transition">
+                    Quick Join
+                </button>
+                <button onclick="resetForm()" class="px-4 py-2 border border-slate-700 hover:bg-slate-800 rounded-xl text-xs text-slate-400">
+                    New Identity
+                </button>
+            </div>
+        </div>
+
+        <!-- Entry Form -->
+        <form id="loginForm" class="space-y-5">
+            
+            <!-- Nickname -->
+            <div class="group">
+                <label for="nickname" class="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1 group-focus-within:text-indigo-400 transition">Nickname</label>
+                <input type="text" id="nickname" required autocomplete="off"
+                    class="w-full bg-slate-900/50 border border-slate-800 rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 focus:outline-none placeholder-slate-600 transition"
+                    placeholder="Enter your handle...">
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <!-- Age -->
+                <div>
+                    <label for="age" class="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">Age</label>
+                    <input type="number" id="age" min="13" required
+                        class="w-full bg-slate-900/50 border border-slate-800 rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 focus:outline-none transition"
+                        placeholder="13+">
+                </div>
+
+                <!-- Gender -->
+                <div>
+                    <label for="gender" class="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">Gender</label>
+                    <select id="gender" required
+                        class="w-full bg-slate-900/50 border border-slate-800 rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 focus:outline-none transition appearance-none">
+                        <option value="" disabled selected>—</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                        <option value="non-binary">Non-binary</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Error Message -->
+            <div id="errorMessage" class="hidden text-red-400 text-xs bg-red-400/10 p-3 rounded-lg border border-red-400/20 italic"></div>
+
+            <!-- Submit -->
+            <button type="submit" 
+                class="w-full bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-black py-4 rounded-2xl transition duration-300 shadow-lg shadow-indigo-600/20 transform active:scale-[0.98]">
+                ENTER CHATROOM
+            </button>
+        </form>
+
+        <p class="text-center text-[10px] text-slate-600 font-mono">
+            BY ENTERING YOU AGREE TO LOCAL MODERATION RULES
+        </p>
+    </div>
+
+    <script>
+        const loginForm = document.getElementById('loginForm');
+        const welcomeBack = document.getElementById('welcomeBack');
+        const errorDiv = document.getElementById('errorMessage');
+
+        // Check for existing user on load
+        window.onload = () => {
+            const savedUser = JSON.parse(localStorage.getItem('chatUser'));
+            if (savedUser && savedUser.nickname) {
+                welcomeBack.classList.remove('hidden');
+                loginForm.classList.add('hidden');
+                document.getElementById('prevName').innerText = savedUser.nickname;
+            }
+        };
+
+        function quickJoin() {
+            window.location.href = 'chat.html';
+        }
+
+        function resetForm() {
+            localStorage.removeItem('chatUser');
+            welcomeBack.classList.add('hidden');
+            loginForm.classList.remove('hidden');
+        }
+
+        loginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+
+            const nickname = document.getElementById('nickname').value.trim();
+            const age = parseInt(document.getElementById('age').value);
+            const gender = document.getElementById('gender').value;
+
+            // Simple frontend validation
+            if (nickname.length < 2) {
+                showError("Nickname too short.");
+                return;
+            }
+
+            if (nickname.length > 12) {
+                showError("Nickname too long (max 12).");
+                return;
+            }
+
+            // Save object
+            const userData = {
+                nickname: nickname,
+                age: age,
+                gender: gender,
+                id: 'user_' + Math.random().toString(36).substr(2, 9)
+            };
+
+            localStorage.setItem('chatUser', JSON.stringify(userData));
+            
+            // Redirect to chat
+            window.location.href = 'chat.html';
+        });
+
+        function showError(msg) {
+            errorDiv.innerText = msg;
+            errorDiv.classList.remove('hidden');
+            // Shake effect
+            loginForm.classList.add('animate-shake');
+            setTimeout(() => loginForm.classList.remove('animate-shake'), 500);
+        }
+    </script>
+
+    <style>
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+        .animate-shake { animation: shake 0.2s ease-in-out 0s 2; }
+    </style>
+</body>
+</html>
